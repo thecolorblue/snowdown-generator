@@ -1,0 +1,22 @@
+$ \begin{array}{r}
+\phantom{+}35 \\
++100 \\
+\hline
+\phantom{000}
+\end{array} $import sys
+import markdown
+
+def convert_markdown_to_html(md_text):
+    """Converts markdown text to HTML using the python-markdown library."""
+    try:
+        html = markdown.markdown(md_text, extensions=['markdown_katex'])
+        return html
+    except Exception as e:
+        # Log error to stderr for debugging, return empty string or error message
+        print(f"Error processing markdown: {e}", file=sys.stderr)
+        return ""
+
+if __name__ == '__main__':
+    markdown_input = sys.stdin.read()
+    html_output = convert_markdown_to_html(markdown_input)
+    sys.stdout.write(html_output)
