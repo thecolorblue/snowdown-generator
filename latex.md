@@ -1,6 +1,6 @@
-**Hello world!!!**
+:::grid{.flex}
 
-test the markdown editor
+<div class="flex-1">
 
 ```math
 \begin{array}{r}
@@ -10,6 +10,43 @@ test the markdown editor
 \phantom{000}
 \end{array}
 ```
+</div>
+<div class="flex-1">
+
+
+```math
+\begin{array}{r}
+\phantom{+}35 \\
++100 \\
+\hline
+\phantom{000}
+\end{array}
+```
+</div>
+<div class="flex-1">
+
+
+```math
+\begin{array}{r}
+\phantom{+}35 \\
++100 \\
+\hline
+\phantom{000}
+\end{array}
+```
+</div>
+<div class="flex-1">
+
+
+```math
+\begin{array}{r}
+\phantom{+}35 \\
++100 \\
+\hline
+\phantom{000}
+\end{array}
+```
+</div>
 
 **Hello world!!!**
 

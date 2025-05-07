@@ -78,7 +78,7 @@ function myRemarkPlugin() {
       ) {
         const data = node.data || (node.data = {})
         const hast = h(node.name, node.attributes || {})
-        console.log(data, hast)
+        
         data.hName = hast.tagName
         data.hProperties = hast.properties
       }

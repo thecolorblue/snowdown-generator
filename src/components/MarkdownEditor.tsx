@@ -1,12 +1,30 @@
 "use client"; // Required for Next.js App Router components that use client-side hooks like useState
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 
 export default function MarkdownEditor() {
   const [value, setValue] = useState("**Hello world!!!**\n\nLet's test some KaTeX:\n\n$$E=mc^2$$\n\nAnd a directive:\n\n::my-directive[My Content]\n\n");
   const [htmlPreview, setHtmlPreview] = useState("");
   const [isLoadingPreview, setIsLoadingPreview] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
+
+  const previewRef = useRef<HTMLDivElement>(null);
+
+  const handlePrint = () => {
+    if (previewRef.current) {
+      // @ts-ignore
+      printJS({
+        printable: previewRef.current.id,
+        type: 'html',
+        documentTitle: 'Snowday',
+        scanStyles: false, // Important if you have global styles affecting the print
+        style: `
+          body { margin: 20px; font-family: sans-serif; }
+          pre { white-space: pre-wrap; word-wrap: break-word; }
+        ` // Add some basic print styling
+      });
+    }
+  };
 
   const fetchHtmlPreview = useCallback(async (markdown: string) => {
     // Do not fetch if markdown is empty or only whitespace,
@@ -20,7 +38,7 @@ export default function MarkdownEditor() {
     setIsLoadingPreview(true);
     setPreviewError(null);
     try {
-      console.log(markdown)
+      
       const response = await fetch('/api/markdown', {
         method: 'POST',
         headers: {
@@ -107,6 +125,23 @@ export default function MarkdownEditor() {
         />
       </div>
       <div style={previewContainerStyle}>
+        <button
+          onClick={handlePrint}
+          style={{
+            position: 'absolute',
+            top: '10px',
+            right: '10px',
+            padding: '8px 12px',
+            backgroundColor: '#007bff',
+            color: 'white',
+            border: 'none',
+            borderRadius: '4px',
+            cursor: 'pointer',
+            zIndex: 1000, // Ensure button is above other elements
+          }}
+        >
+          Print
+        </button>
         {isLoadingPreview && (
           <div style={loadingOverlayStyle}>Loading preview...</div>
         )}
@@ -117,7 +152,12 @@ export default function MarkdownEditor() {
           </div>
         )}
         {!isLoadingPreview && !previewError && (
-          <div dangerouslySetInnerHTML={{ __html: htmlPreview }} style={{ whiteSpace: 'normal' /* Allow normal wrapping */ }} />
+          <div
+            id="printablePreview" // Added ID for printJS
+            ref={previewRef}
+            dangerouslySetInnerHTML={{ __html: htmlPreview }}
+            style={{ whiteSpace: 'normal', paddingTop: '40px' /* Adjust to avoid overlap with button */ }}
+          />
         )}
       </div>
     </div>
