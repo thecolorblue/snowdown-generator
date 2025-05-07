@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { spawn } from 'child_process';
-import path from 'path';
+import remarkDirective from 'remark-directive';
+import rehypeKatex from 'rehype-katex';
+import rehypeRaw from 'rehype-raw';
+import {visit} from 'unist-util-visit'
+import {h} from 'hastscript'
+// Import remarkGfm if you want GitHub Flavored Markdown (tables, strikethrough, etc.)
+// import remarkGfm from 'remark-gfm'; // This will be imported dynamically below
 
 export async function POST(request: NextRequest) {
   try {
@@ -11,47 +16,33 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid markdown input' }, { status: 400 });
     }
 
-    // Determine the path to the Python script.
-    // __dirname in Vercel/Next.js API routes points to the .next/server/app/api/markdown directory.
-    // We need to go up a few levels to reach the project root where snowdown.py is.
-    // Adjust the path based on your project structure if snowdown.py is located elsewhere.
-    const scriptPath = path.resolve(process.cwd(), 'snowdown.py');
-    // For local development, you might need a different path if process.cwd() is not the project root.
-    // const scriptPath = path.resolve(__dirname, '../../../../../snowdown.py'); // Example for Vercel deployment structure
+    if (!markdownText.trim()) {
+      return NextResponse.json({ html: '' });
+    }
+
+    // To return HTML from MDX server-side:
+    const { unified } = await import('unified');
+    const remarkParse = (await import('remark-parse')).default;
+    const remarkRehype = (await import('remark-rehype')).default;
+    const rehypeStringify = (await import('rehype-stringify')).default;
+    // remarkGfm might be useful too
+    const remarkGfm = (await import('remark-gfm')).default;
 
 
-    const pythonProcess = spawn('python3', [scriptPath]);
+    const processor = unified()
+      .use(remarkParse)
+      .use(remarkGfm) // Optional: for GitHub Flavored Markdown
+      .use(remarkDirective)
+      .use(myRemarkPlugin)
+      .use(remarkRehype, { allowDangerousHtml: true }) // allowDangerousHtml is needed for rehype-raw
+      .use(rehypeRaw) // Process raw HTML
+      .use(rehypeKatex) // Process LaTeX
+      .use(rehypeStringify);
 
-    let htmlOutput = '';
-    let errorOutput = '';
+    const result = await processor.process(markdownText);
+    const htmlOutput = String(result);
 
-    pythonProcess.stdin.write(markdownText);
-    pythonProcess.stdin.end();
-
-    pythonProcess.stdout.on('data', (data) => {
-      htmlOutput += data.toString();
-    });
-
-    pythonProcess.stderr.on('data', (data) => {
-      errorOutput += data.toString();
-    });
-
-    return new Promise((resolve) => {
-      pythonProcess.on('close', (code) => {
-        if (code !== 0 || errorOutput) {
-          console.error(`Python script error: ${errorOutput}`);
-          console.error(`Python script exit code: ${code}`);
-          resolve(NextResponse.json({ error: 'Error processing markdown', details: errorOutput }, { status: 500 }));
-        } else {
-          resolve(NextResponse.json({ html: htmlOutput }));
-        }
-      });
-
-      pythonProcess.on('error', (err) => {
-        console.error('Failed to start python process.', err);
-        resolve(NextResponse.json({ error: 'Failed to start markdown processing service', details: err.message }, { status: 500 }));
-      });
-    });
+    return NextResponse.json({ html: htmlOutput });
 
   } catch (error) {
     console.error('API error:', error);
@@ -59,6 +50,38 @@ export async function POST(request: NextRequest) {
     if (error instanceof Error) {
         message = error.message;
     }
-    return NextResponse.json({ error: 'Internal Server Error', details: message }, { status: 500 });
+    // Provide more specific error if it's from MDX processing
+    if (error && typeof error === 'object' && 'message' in error && typeof error.message === 'string') {
+        message = error.message;
+    }
+    return NextResponse.json({ error: 'Error processing MDX', details: message }, { status: 500 });
+  }
+}
+
+
+// This plugin is an example to let users write HTML with directives.
+// It’s informative but rather useless.
+// See below for others examples.
+function myRemarkPlugin() {
+  /**
+   * @param {Root} tree
+   *   Tree.
+   * @returns {undefined}
+   *   Nothing.
+   */
+  return function (tree) {
+    visit(tree, function (node) {
+      if (
+        node.type === 'containerDirective' ||
+        node.type === 'leafDirective' ||
+        node.type === 'textDirective'
+      ) {
+        const data = node.data || (node.data = {})
+        const hast = h(node.name, node.attributes || {})
+        console.log(data, hast)
+        data.hName = hast.tagName
+        data.hProperties = hast.properties
+      }
+    })
   }
 }
