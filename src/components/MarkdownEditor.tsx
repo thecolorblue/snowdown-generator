@@ -59,7 +59,7 @@ export default function MarkdownEditor() {
           height: width * 1.294,
           logging: true,
           useCORS: true,
-          onclone: (document) => {
+          onclone: () => {
             // Optional: Modify the cloned document before rendering
           }
         });
@@ -153,18 +153,7 @@ export default function MarkdownEditor() {
   const handleChange = (newValue: string | undefined) => {
     setValue(newValue || "");
   };
-
-  const editorStyle: React.CSSProperties = {
-    width: '100%',
-    height: '100%',
-    padding: '10px',
-    border: '1px solid #ccc',
-    fontFamily: 'monospace',
-    fontSize: '14px',
-    boxSizing: 'border-box',
-    resize: 'none',
-  };
-
+  
   const previewContainerStyle: React.CSSProperties = {
     flex: 1,
     overflow: 'auto',

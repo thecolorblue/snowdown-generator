@@ -331,8 +331,8 @@ function storyPlugin() {
             const firstChild = dn.children[0];
             if (firstChild.type === 'text') {
               storyTopic = (firstChild as MdastText).value;
-            } else if ('value' in firstChild && typeof (firstChild as any).value === 'string') {
-              storyTopic = (firstChild as any).value;
+            } else if ('value' in firstChild && typeof (firstChild as unknown as { value: unknown }).value === 'string') {
+              storyTopic = (firstChild as { value: string }).value;
             }
           }
 
