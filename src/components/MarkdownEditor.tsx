@@ -1,4 +1,4 @@
-"use client"; // Required for Next.js App Router components that use client-side hooks like useState
+ "use client"; // Required for Next.js App Router components that use client-side hooks like useState
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import Editor from "@monaco-editor/react";
@@ -16,20 +16,29 @@ export default function MarkdownEditor() {
   // Fetch initial content from public/latex.md
   useEffect(() => {
     const fetchInitialContent = async () => {
-      try {
-        const response = await fetch('/latex.md');
-        if (!response.ok) {
-          throw new Error(`Failed to fetch initial content: ${response.statusText}`);
+      const queryParams = new URLSearchParams(window.location.search);
+      const loadFile = queryParams.get('load');
+
+      if (loadFile) {
+        try {
+          const response = await fetch(`/${loadFile}`);
+          if (!response.ok) {
+            throw new Error(`Failed to fetch initial content from /${loadFile}: ${response.statusText}`);
+          }
+          const text = await response.text();
+          setValue(text);
+        } catch (error) {
+          console.error(`Error fetching initial content from /${loadFile}:`, error);
+          setPreviewError(error instanceof Error ? error.message : `Failed to load initial content from /${loadFile}`);
+          setValue(`# Error loading content from /${loadFile}.\n\nPlease check the file exists and the console for details.`);
+        } finally {
+          setIsInitialContentLoaded(true);
         }
-        const text = await response.text();
-        setValue(text);
-      } catch (error) {
-        console.error("Error fetching initial content:", error);
-        setPreviewError(error instanceof Error ? error.message : "Failed to load initial content");
-        // Optionally, set a default value or an error message in the editor
-        setValue("# Error loading initial content.\n\nPlease check the console for details.");
-      } finally {
-        setIsInitialContentLoaded(true);
+      } else {
+        // No load parameter, so we don't load any initial content by default.
+        // Or, set a default message or leave the editor empty.
+        setValue(""); // Or some placeholder like "# Start typing your Markdown here..."
+        setIsInitialContentLoaded(true); // Mark as loaded even if nothing was fetched
       }
     };
 

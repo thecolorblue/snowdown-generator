@@ -11,9 +11,11 @@
 
 :::main{.grid.grid-flow-col}
 
-:h1[Math Practice]{.justify-items-center.text-center}
+:h1[Time Trials]{.justify-items-center.text-center}
 
 :::
+
+::generate_story[It was a sunny day]{param1="test parameter 2" requiredWords="Tuesday,Monday,February"}
 
 
 ::hr
