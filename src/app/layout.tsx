@@ -27,6 +27,7 @@ export default function RootLayout({
       <head>
         <script src="https://printjs-4de6.kxcdn.com/print.min.js"></script>
         <link rel="stylesheet" type="text/css" href="https://printjs-4de6.kxcdn.com/print.min.css" />
+        <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
       </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
