@@ -373,7 +373,7 @@ function storyPlugin() {
       }
     });
 
-    await Promise.all(promises); // Wait for all story generations to complete
+    await Promise.all(promises);
   };
 }
 
