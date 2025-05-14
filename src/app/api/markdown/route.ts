@@ -365,7 +365,6 @@ function storyPlugin() {
             } as Content; // Ensure the constructed object conforms to Content
           });
 
-          // Replace the original children of the directive node with the new paragraphs.
           dn.children = newMdastChildren;
 
         })();
