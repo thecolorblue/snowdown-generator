@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
+import YAML from 'yaml'
+import remarkFrontmatter from 'remark-frontmatter';
 import remarkDirective from 'remark-directive';
 import rehypeKatex from 'rehype-katex';
 import rehypeRaw from 'rehype-raw';
@@ -47,9 +49,10 @@ export async function POST(request: NextRequest) {
     const processor = unified()
       .use(remarkParse)
       .use(remarkGfm) // Optional: for GitHub Flavored Markdown
+      .use(remarkFrontmatter, ['yaml'])
       .use(remarkDirective)
-      .use(myRemarkPlugin)
-      .use(storyPlugin)
+      .use(sdMetadata)
+      .use(sdGenerateStory)
       .use(remarkRehype, { allowDangerousHtml: true }) // allowDangerousHtml is needed for rehype-raw
       .use(rehypeRaw) // Process raw HTML
       .use(rehypeKatex) // Process LaTeX
@@ -150,7 +153,7 @@ Make the story about 4 paragraphs long.
   try {
     const completion = await openai.chat.completions.create({
       messages: [{ role: 'user', content: prompt }],
-      model: 'gpt-4o-mini',
+      model: 'gpt-4.1-nano',
     });
 
     const storyResult = completion.choices[0]?.message?.content || 'Failed to generate story.';
@@ -166,7 +169,7 @@ Make the story about 4 paragraphs long.
 // This plugin is an example to let users write HTML with directives.
 // It’s informative but rather useless.
 // See below for others examples.
-function myRemarkPlugin() {
+function sdMetadata() {
   /**
    * @param {Root} tree
    *   Tree.
@@ -174,12 +177,29 @@ function myRemarkPlugin() {
    *   Nothing.
    */
   return function (tree: Root): void {
+    var metadata = {};
+    if (tree.type === 'root' && tree.children[0].type === 'yaml') {
+      try {
+        metadata = YAML.parse(tree.children[0].value)
+      } catch(e) {
+        console.error(e);
+      }
+    }
+
     visit(tree, (node: UnistNode): void => {
       if (
         node.type === 'containerDirective' ||
         node.type === 'leafDirective' ||
         node.type === 'textDirective'
       ) {
+
+        if (node.type === 'textDirective' && node.name === 'get') {
+          console.log(node.children[0].value, metadata[node.children[0].value]);
+          Object.assign(node, {
+            type: 'text',
+            value: metadata[node.children[0].value]
+          });
+        }
         // After this check, node is known to be one of the directive types.
         const directiveNode = node as DirectiveNode;
 
@@ -299,10 +319,18 @@ function annotateWordCount(story: string): string {
 }
 
 // This plugin handles the :::story directive by generating a story using OpenAI.
-function storyPlugin() {
+function sdGenerateStory() {
   // The plugin returns an async transformer function
   return async function transformer(tree: Root): Promise<void> {
     const promises: Promise<void>[] = []; // To store promises from async operations
+    var metadata = {};
+    if (tree.type === 'root' && tree.children[0].type === 'yaml') {
+      try {
+        metadata = YAML.parse(tree.children[0].value)
+      } catch(e) {
+        console.error(e);
+      }
+    }
 
     visit(tree, (node: UnistNode) => { // The visitor itself is synchronous
       if (
@@ -316,15 +344,18 @@ function storyPlugin() {
         // Create a promise for the async story generation and modification
         const promise = (async () => {
           const storyParams: StoryParams = {
-            genre: dn.attributes?.genre || 'fantasy',
-            location: dn.attributes?.location || 'a magical forest',
-            style: dn.attributes?.style || 'Dr. Seuss',
-            interests: dn.attributes?.interests || 'reading and adventure',
+            genre: dn.attributes?.genre || metadata.story_genre || 'fantasy',
+            location: dn.attributes?.location || metadata.story_location || 'a magical forest',
+            style: dn.attributes?.style || metadata.story_style || 'Dr. Seuss',
+            interests: dn.attributes?.interests || metadata.story_interests || 'reading and adventure',
             friend: dn.attributes?.friends || 'a talking squirrel',
             user_name: dn.attributes?.user_name || 'Alex',
             user_age: parseInt(dn.attributes?.user_age || '10', 10),
             paragraphs: parseInt(dn.attributes?.paragraphs || '4', 10)
           };
+          const storyClasses = dn.attributes?.style ?
+            `generated-story ${dn.attributes?.style.split('n').map(c => c.trim()).join(' ')}`:
+            'generated-story';
 
           let storyTopic = "a surprising event";
           if (dn.children && dn.children.length > 0) {
@@ -337,8 +368,20 @@ function storyPlugin() {
           }
 
           const requiredWordsString = dn.attributes?.requiredWords || '';
-          const requiredWords = requiredWordsString ? requiredWordsString.split(',').map(word => word.trim()).filter(word => word.length > 0) : [];
+          let requiredWords = [];
 
+          if (metadata.story_required_words && Array.isArray(metadata.story_required_words)) {
+            requiredWords = metadata.story_required_words;
+          } else if(typeof metadata.story_required_words === 'string') {
+            requiredWords = metadata.story_required_words.split(',')
+              .map(word => word.trim())
+              .filter(word => word.length > 0);
+          } else if(requiredWordsString) {
+            requiredWords = requiredWordsString.split(',')
+              .map(word => word.trim())
+              .filter(word => word.length > 0);
+          }
+          
           let storyText = await generateStory(storyTopic, storyParams);
 
           if (requiredWords.length > 0) {
@@ -354,7 +397,7 @@ function storyPlugin() {
           
           // The directive node itself will be transformed into a div.
           data.hName = 'div';
-          data.hProperties = { className: 'generated-story' }; // Add a class for styling.
+          data.hProperties = { className: storyClasses }; // Add a class for styling.
 
           // The children of this div will be paragraphs generated from the story text.
           // We need to create MDAST paragraph nodes.

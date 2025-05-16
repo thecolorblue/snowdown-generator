@@ -46,6 +46,19 @@ main {
 
 .generated-story {
   font-size: 1em;
-    line-height: 1.7em;
-    padding: 20px;
+  line-height: 1.7em;
+  padding: 20px;
+}
+
+.generated-story.tight {
+  line-height: 1.5em;
+}
+.generated-story.loose {
+  line-height: 2em;
+}
+
+.html-view {
+  height: calc(1.29 * 50vw);
+  min-height: 100px;
+  word-wrap: break-word;
 }

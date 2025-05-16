@@ -143,7 +143,7 @@ export default function MarkdownEditor() {
 
     const handler = setTimeout(() => {
       fetchHtmlPreview(value);
-    }, 500);
+    }, 5000);
 
     return () => {
       clearTimeout(handler);
@@ -226,6 +226,7 @@ export default function MarkdownEditor() {
         <div
           ref={previewRef}
           dangerouslySetInnerHTML={{ __html: htmlPreview }}
+          className="html-view"
           style={{
             minHeight: '100px',
             wordWrap: 'break-word',
