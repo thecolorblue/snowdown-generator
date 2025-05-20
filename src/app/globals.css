@@ -61,4 +61,5 @@ main {
   height: calc(1.29 * 50vw);
   min-height: 100px;
   word-wrap: break-word;
+  padding: 20px;
 }

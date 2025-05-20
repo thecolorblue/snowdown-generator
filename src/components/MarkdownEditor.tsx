@@ -143,7 +143,7 @@ export default function MarkdownEditor() {
 
     const handler = setTimeout(() => {
       fetchHtmlPreview(value);
-    }, 5000);
+    }, 500);
 
     return () => {
       clearTimeout(handler);

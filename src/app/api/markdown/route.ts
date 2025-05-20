@@ -1,17 +1,134 @@
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
+import { PassThrough } from 'node:stream';
 import YAML from 'yaml'
 import remarkFrontmatter from 'remark-frontmatter';
 import remarkDirective from 'remark-directive';
 import rehypeKatex from 'rehype-katex';
 import rehypeRaw from 'rehype-raw';
+import rehypeGithubEmoji from 'rehype-github-emoji';
+import rehypeTwemojify from 'rehype-twemojify';
 import {visit} from 'unist-util-visit'
 import {h} from 'hastscript';
-import type { Root, Content, Text as MdastText } from 'mdast';
+import type { Root, Content, Text as MdastText, Code as MdastCode } from 'mdast';
 import type { Node as UnistNode, Data, Parent } from 'unist';
 import type { Element as HastElement, Properties as HastProperties } from 'hast';
 import OpenAI from 'openai';
+
+import {fromMarkdown} from 'mdast-util-from-markdown'
+
+const { lua, lauxlib, lualib, to_jsstring, to_luastring } = require('fengari');
+const LUA_OK = lua.LUA_OK;
+
+function luaValueToString(L, idx) {
+    // Always use luaL_tolstring, which pushes the string on top of the stack
+    lauxlib.luaL_tolstring(L, idx);
+    // Now top of stack is a string
+    const s = lua.lua_tostring(L, -1); // Uint8Array or null
+    let result;
+    if (s === null) {
+        result = '';
+    } else {
+        result = to_jsstring(s);
+    }
+    lua.lua_pop(L, 1); // Remove the string from the stack
+    return result;
+}
+
+// Recursively push a JS object as a Lua table onto the stack
+function pushJsToLua(L, obj) {
+    if (Array.isArray(obj)) {
+        lua.lua_createtable(L, obj.length, 0);
+        obj.forEach((val, i) => {
+            pushJsToLua(L, val);
+            lua.lua_seti(L, -2, i + 1);
+        });
+    } else if (obj !== null && typeof obj === 'object') {
+        lua.lua_createtable(L, 0, Object.keys(obj).length);
+        Object.entries(obj).forEach(([key, val]) => {
+            pushJsToLua(L, val);
+            lua.lua_setfield(L, -2, to_luastring(key));
+        });
+    } else if (typeof obj === 'string') {
+        lua.lua_pushstring(L, to_luastring(obj));
+    } else if (typeof obj === 'number') {
+        lua.lua_pushnumber(L, obj);
+    } else if (typeof obj === 'boolean') {
+        lua.lua_pushboolean(L, obj);
+    } else {
+        lua.lua_pushnil(L);
+    }
+}
+
+// Safely convert Lua return value to JS
+function luaReturnToJs(L, idx) {
+    switch (lua.lua_type(L, idx)) {
+        case lua.LUA_TNIL:
+            return null;
+        case lua.LUA_TSTRING:
+            return to_jsstring(lua.lua_tostring(L, idx));
+        case lua.LUA_TNUMBER:
+            return lua.lua_tonumber(L, idx);
+        case lua.LUA_TBOOLEAN:
+            return !!lua.lua_toboolean(L, idx);
+        case lua.LUA_TTABLE:
+            return '[Lua table]';
+        default:
+            return `[Lua type: ${lua.lua_typename(L, lua.lua_type(L, idx))}]`;
+    }
+}
+
+function runLuaString(luaCode, inputObject) {
+    const L = lauxlib.luaL_newstate();
+    lualib.luaL_openlibs(L);
+
+    // Buffer to capture Lua print output
+    let outputBuffer = [];
+
+    // Override the Lua print function
+    lua.lua_pushjsfunction(L, function(L) {
+        const n = lua.lua_gettop(L);
+        let parts = [];
+        for (let i = 1; i <= n; i++) {
+            parts.push(luaValueToString(L, i));
+        }
+        outputBuffer.push(parts.join('\t'));
+        return 0;
+    });
+    lua.lua_setglobal(L, to_luastring('print'));
+
+    // Push the JS object as a global Lua variable 'input'
+    pushJsToLua(L, inputObject);
+    lua.lua_setglobal(L, to_luastring('input'));
+
+    // Load and run Lua code
+    if (lauxlib.luaL_loadstring(L, to_luastring(luaCode)) === lua.LUA_OK) {
+        if (lua.lua_pcall(L, 0, lua.LUA_MULTRET, 0) === lua.LUA_OK) {
+            // Get return value (optional)
+            let returnValue = null;
+            const nResults = lua.lua_gettop(L);
+            if (nResults > 0) {
+                returnValue = luaReturnToJs(L, -1);
+                lua.lua_pop(L, 1);
+            }
+            return {
+                print: outputBuffer.join('\n'),
+                return: returnValue
+            };
+        } else {
+            // Error in lua_pcall
+            const err = lua.lua_tojsstring(L, -1);
+            lua.lua_pop(L, 1);
+            throw new Error(err);
+        }
+    } else {
+        // Error in luaL_loadstring
+        const err = lua.lua_tojsstring(L, -1);
+        lua.lua_pop(L, 1);
+        throw new Error(err);
+    }
+}
 
 // Define an interface for the directive nodes based on their structure
 interface DirectiveNode extends Parent { // Extend Parent to include children
@@ -21,6 +138,25 @@ interface DirectiveNode extends Parent { // Extend Parent to include children
   children: Content[]; // Explicitly define children based on mdast Content
   // data is already part of UnistNode but can be extended
 }
+
+// Interface for frontmatter metadata
+interface Metadata {
+  story_genre?: string;
+  story_location?: string;
+  story_style?: string;
+  story_interests?: string;
+  story_required_words?: string | string[];
+  [key: string]: any; // Allow other properties
+}
+
+// Interface for mdast Code_Block node
+interface MdastCodeNode extends UnistNode {
+  type: 'code';
+  lang?: string;
+  meta?: string;
+  value: string;
+}
+
 // Import remarkGfm if you want GitHub Flavored Markdown (tables, strikethrough, etc.)
 // import remarkGfm from 'remark-gfm'; // This will be imported dynamically below
 
@@ -48,12 +184,15 @@ export async function POST(request: NextRequest) {
 
     const processor = unified()
       .use(remarkParse)
-      .use(remarkGfm) // Optional: for GitHub Flavored Markdown
+      .use(sdMetadata)
+      .use(luaProcessing)
+      // .use(remarkGfm) // Optional: for GitHub Flavored Markdown
       .use(remarkFrontmatter, ['yaml'])
       .use(remarkDirective)
-      .use(sdMetadata)
       .use(sdGenerateStory)
       .use(remarkRehype, { allowDangerousHtml: true }) // allowDangerousHtml is needed for rehype-raw
+      .use(rehypeGithubEmoji)
+      // .use(rehypeTwemojify)
       .use(rehypeRaw) // Process raw HTML
       .use(rehypeKatex) // Process LaTeX
       .use(rehypeStringify);
@@ -177,12 +316,14 @@ function sdMetadata() {
    *   Nothing.
    */
   return function (tree: Root): void {
-    var metadata = {};
-    if (tree.type === 'root' && tree.children[0].type === 'yaml') {
+    let metadata: Metadata = {}; // Initialize with Metadata type
+    if (tree.children.length > 0 && tree.children[0]?.type === 'yaml') {
       try {
-        metadata = YAML.parse(tree.children[0].value)
-      } catch(e) {
-        console.error(e);
+        const yamlNode = tree.children[0] as UnistNode & { type: 'yaml', value: string }; // More specific type for YAML node
+        metadata = YAML.parse(yamlNode.value) as Metadata; // Parse and assert
+      } catch (e) {
+        console.error('Error parsing YAML in sdMetadata:', e);
+        metadata = {}; // Reset on error
       }
     }
 
@@ -192,27 +333,30 @@ function sdMetadata() {
         node.type === 'leafDirective' ||
         node.type === 'textDirective'
       ) {
+        const directiveNode = node as DirectiveNode; // Assert node is DirectiveNode
 
-        if (node.type === 'textDirective' && node.name === 'get') {
-          console.log(node.children[0].value, metadata[node.children[0].value]);
-          Object.assign(node, {
-            type: 'text',
-            value: metadata[node.children[0].value]
-          });
+        if (directiveNode.type === 'textDirective' && directiveNode.name === 'get') {
+          const childValueNode = directiveNode.children?.[0];
+          if (childValueNode?.type === 'text') {
+            const key = (childValueNode as MdastText).value;
+            // console.log(`:get directive found for key: ${key}`, metadata[key]);
+            Object.assign(directiveNode, { // Transform node
+              type: 'text',
+              value: metadata[key] !== undefined ? String(metadata[key]) : `Error: Metadata key "${key}" not found`
+            });
+          } else {
+            Object.assign(directiveNode, { type: 'text', value: 'Error: Invalid :get directive usage' });
+          }
+        } else {
+          // Generic directive handling (transform to HAST)
+          const data = (directiveNode.data || (directiveNode.data = {})) as Data & {
+            hName?: string;
+            hProperties?: HastProperties;
+          };
+          const hast: HastElement = h(directiveNode.name, directiveNode.attributes || {});
+          data.hName = hast.tagName;
+          data.hProperties = hast.properties;
         }
-        // After this check, node is known to be one of the directive types.
-        const directiveNode = node as DirectiveNode;
-
-        // Ensure 'data' exists and correctly typed for hName/hProperties.
-        const data = (directiveNode.data || (directiveNode.data = {})) as Data & {
-          hName?: string;
-          hProperties?: HastProperties;
-        };
-        
-        const hast: HastElement = h(directiveNode.name, directiveNode.attributes || {});
-        
-        data.hName = hast.tagName;
-        data.hProperties = hast.properties;
       }
     });
   };
@@ -227,16 +371,13 @@ async function validateParagraph(story: string, requiredWords: string[]): Promis
 
   const lowerCaseStory = story.toLowerCase();
   const missing_words = requiredWords.filter(
-    (word) => !lowerCaseStory.includes(word.toLowerCase())
+    (word: string) => !lowerCaseStory.includes(word.toLowerCase()) // Typed word
   );
 
   if (missing_words.length === 0) {
-    // Even if no words are missing, we can cache this outcome,
-    // especially if the "story" itself is a result of a previous generation
-    // and we want to avoid re-processing if the same validation is requested.
     storyCache.set(cacheKey, story);
     saveCache();
-    return story; // All required words are present
+    return story;
   }
 
   const openai = new OpenAI({
@@ -265,7 +406,6 @@ Rewritten paragraph:
     return rewrittenParagraph;
   } catch (error) {
     console.error('Error calling OpenAI API in validateParagraph:', error);
-    // Fallback to original story in case of error, do not cache errors.
     return story;
   }
 }
@@ -274,65 +414,50 @@ function annotateWordCount(story: string): string {
   if (!story || story.trim() === '') {
     return '';
   }
-
-  // Helper to count words in a given text string
   const countWordsInText = (text: string): number => {
     if (!text || text.trim() === '') {
       return 0;
     }
-    // A word is a sequence of alphanumeric characters
     const words = text.match(/\b[a-zA-Z0-9]+\b/g);
     return words ? words.length : 0;
   };
-
-  // Split the story by sentence terminators (. ! ?), keeping the terminators with the preceding text.
-  // The lookbehind `(?<=[.!?])` splits *after* the delimiter.
   const parts = story.split(/(?<=[.!?])/);
-  
   let resultText = '';
   let currentTotalWords = 0;
-
   for (const part of parts) {
     if (part === '') {
       continue;
     }
-
     const wordsInThisPart = countWordsInText(part);
     currentTotalWords += wordsInThisPart;
-
-    // Find the actual content and any trailing whitespace for this part
-    // to place the count correctly before trailing whitespace.
     const matchTrailing = part.match(/(\s*)$/);
     const trailingWhitespace = matchTrailing ? matchTrailing[0] : '';
     const contentOfPart = part.substring(0, part.length - trailingWhitespace.length);
-
     if (contentOfPart.length > 0) {
-      // If there's actual content (not just whitespace)
       resultText += contentOfPart + `(${currentTotalWords})` + trailingWhitespace;
     } else {
-      // If the part was only whitespace (e.g. story = "Hi.   . Bye"), preserve it without annotation
       resultText += part;
     }
   }
-
   return resultText;
 }
 
-// This plugin handles the :::story directive by generating a story using OpenAI.
+// This plugin handles the :::generate_story directive
 function sdGenerateStory() {
-  // The plugin returns an async transformer function
-  return async function transformer(tree: Root): Promise<void> {
-    const promises: Promise<void>[] = []; // To store promises from async operations
-    var metadata = {};
-    if (tree.type === 'root' && tree.children[0].type === 'yaml') {
+  return async function transformer(tree: Root, file: any): Promise<void> { // Added 'file' for context if needed by remark/rehype
+    const promises: Promise<void>[] = [];
+    let metadata: Metadata = {}; // Initialize with Metadata type
+    if (tree.children.length > 0 && tree.children[0]?.type === 'yaml') {
       try {
-        metadata = YAML.parse(tree.children[0].value)
-      } catch(e) {
-        console.error(e);
+        const yamlNode = tree.children[0] as UnistNode & { type: 'yaml', value: string };
+        metadata = YAML.parse(yamlNode.value) as Metadata;
+      } catch (e) {
+        console.error('Error parsing YAML in sdGenerateStory:', e);
+        metadata = {};
       }
     }
 
-    visit(tree, (node: UnistNode) => { // The visitor itself is synchronous
+    visit(tree, (node: UnistNode, index?: number, parent?: Parent) => { // Added index and parent
       if (
         (node.type === 'containerDirective' ||
          node.type === 'leafDirective' ||
@@ -340,21 +465,19 @@ function sdGenerateStory() {
         (node as DirectiveNode).name === 'generate_story'
       ) {
         const dn = node as DirectiveNode;
-
-        // Create a promise for the async story generation and modification
         const promise = (async () => {
           const storyParams: StoryParams = {
             genre: dn.attributes?.genre || metadata.story_genre || 'fantasy',
             location: dn.attributes?.location || metadata.story_location || 'a magical forest',
             style: dn.attributes?.style || metadata.story_style || 'Dr. Seuss',
             interests: dn.attributes?.interests || metadata.story_interests || 'reading and adventure',
-            friend: dn.attributes?.friends || 'a talking squirrel',
-            user_name: dn.attributes?.user_name || 'Alex',
-            user_age: parseInt(dn.attributes?.user_age || '10', 10),
-            paragraphs: parseInt(dn.attributes?.paragraphs || '4', 10)
+            friend: dn.attributes?.friend || (metadata.friends as string) || 'a talking squirrel', // Corrected 'friends'
+            user_name: dn.attributes?.user_name || (metadata.user_name as string) || 'Alex',
+            user_age: parseInt(dn.attributes?.user_age || (metadata.user_age as string) || '10', 10),
+            paragraphs: parseInt(dn.attributes?.paragraphs || (metadata.paragraphs as string) || '4', 10)
           };
           const storyClasses = dn.attributes?.style ?
-            `generated-story ${dn.attributes?.style.split('n').map(c => c.trim()).join(' ')}`:
+            `generated-story ${dn.attributes?.style.split(' ').map((c: string) => c.trim()).join(' ')}` : // Typed 'c'
             'generated-story';
 
           let storyTopic = "a surprising event";
@@ -362,60 +485,124 @@ function sdGenerateStory() {
             const firstChild = dn.children[0];
             if (firstChild.type === 'text') {
               storyTopic = (firstChild as MdastText).value;
-            } else if ('value' in firstChild && typeof (firstChild as unknown as { value: unknown }).value === 'string') {
-              storyTopic = (firstChild as { value: string }).value;
+            } else if ('value' in firstChild && typeof (firstChild as any).value === 'string') {
+              storyTopic = (firstChild as any).value;
             }
           }
 
           const requiredWordsString = dn.attributes?.requiredWords || '';
-          let requiredWords = [];
+          let requiredWords: string[] = []; // Initialize as string array
 
-          if (metadata.story_required_words && Array.isArray(metadata.story_required_words)) {
-            requiredWords = metadata.story_required_words;
-          } else if(typeof metadata.story_required_words === 'string') {
-            requiredWords = metadata.story_required_words.split(',')
-              .map(word => word.trim())
-              .filter(word => word.length > 0);
-          } else if(requiredWordsString) {
+          if (metadata.story_required_words) {
+            if (Array.isArray(metadata.story_required_words)) {
+              requiredWords = metadata.story_required_words.filter((word: any): word is string => typeof word === 'string'); // Ensure elements are strings
+            } else if (typeof metadata.story_required_words === 'string') {
+              requiredWords = metadata.story_required_words.split(',')
+                .map((word: string) => word.trim()) // Typed word
+                .filter((word: string) => word.length > 0); // Typed word
+            }
+          } else if (requiredWordsString) {
             requiredWords = requiredWordsString.split(',')
-              .map(word => word.trim())
-              .filter(word => word.length > 0);
+              .map((word: string) => word.trim()) // Typed word
+              .filter((word: string) => word.length > 0); // Typed word
           }
           
           let storyText = await generateStory(storyTopic, storyParams);
-
           if (requiredWords.length > 0) {
             storyText = await validateParagraph(storyText, requiredWords);
           }
-
           storyText = annotateWordCount(storyText);
 
           const data = (dn.data || (dn.data = {})) as Data & {
             hName?: string;
             hProperties?: HastProperties;
           };
-          
-          // The directive node itself will be transformed into a div.
           data.hName = 'div';
-          data.hProperties = { className: storyClasses }; // Add a class for styling.
-
-          // The children of this div will be paragraphs generated from the story text.
-          // We need to create MDAST paragraph nodes.
+          data.hProperties = { className: storyClasses };
           const newMdastChildren: Content[] = storyText.split('\n\n').map(paragraphText => {
             return {
               type: 'paragraph',
               children: [{ type: 'text', value: paragraphText } as MdastText]
-            } as Content; // Ensure the constructed object conforms to Content
+            } as Content;
           });
 
-          dn.children = newMdastChildren;
-
+          // Replace node content or structure
+          if (parent && typeof index === 'number' && (dn.type === 'containerDirective' || dn.type === 'leafDirective')) {
+             // For block directives, replace the node in parent
+            parent.children.splice(index, 1, {
+                type: dn.type, // Keep original directive type or change if needed
+                name: dn.name,
+                attributes: dn.attributes,
+                data: data, // Include HAST data
+                children: newMdastChildren
+            } as DirectiveNode);
+          } else {
+            // For textDirective or if parent/index not available, modify node directly
+            dn.children = newMdastChildren; // This might be okay if rehype handles it
+          }
         })();
         promises.push(promise);
       }
     });
-
     await Promise.all(promises);
   };
 }
 
+// This plugin handles Lua code blocks
+function luaProcessing() {
+  return function transformer(tree: Root) { // Kept async based on file content
+    // No explicit promises.push/Promise.all needed here if luaScript.exec() is fully synchronous
+    // and stream events resolve before visit callback returns.
+    // If luaScript.exec() were async, this would need promise collection.
+    const promises: Promise<void>[] = [];
+    let metadata: Metadata = {}; // Initialize with Metadata type
+    if (tree.children.length > 0 && tree.children[0]?.type === 'yaml') {
+      try {
+        const yamlNode = tree.children[0] as UnistNode & { type: 'yaml', value: string };
+        metadata = YAML.parse(yamlNode.value) as Metadata;
+      } catch (e) {
+        console.error('Error parsing YAML in sdGenerateStory:', e);
+        metadata = {};
+      }
+    }
+
+    console.log(metadata);
+
+    visit(tree, (node: UnistNode) => {
+      if (node.type === 'code') {
+        const codeNode = node as MdastCodeNode; // Assert node is MdastCodeNode
+        if (codeNode.lang === 'lua') {
+          
+            let result = '';
+            try {
+              const { print } = runLuaString(codeNode.value, metadata);
+              result = print;
+              if (result !== null) {
+                console.log("Lua returned:", result);
+              }
+            } catch (err: any) { // Add type annotation for err
+              const errorMessage = err instanceof Error ? err.message : String(err);
+              result = "Lua Error:" + errorMessage;
+              // Create a text node with the error message if needed, or handle as appropriate
+              // For now, just logging, as the original code didn't replace the node on error.
+              // If replacement is desired:
+              // const errorNode: MdastText = { type: 'text', value: `Lua Error: ${errorMessage}` };
+              // Object.assign(codeNode, { type: 'paragraph', children: [errorNode], value: undefined, lang: undefined, meta: undefined });
+            }
+
+            const root = fromMarkdown(result);
+            
+            // Transform the code node into a paragraph with the Lua output.
+            // This assumes stream events have fired and accumulation is complete due to sync exec and .end()
+            const transformedNode = node as any; // Cast to any for easier transformation
+            transformedNode.type = 'containerDirective';
+            transformedNode.name = 'div';
+            transformedNode.children = root.children;
+            delete transformedNode.value;
+            delete transformedNode.lang;
+            delete transformedNode.meta;
+        }
+      }
+    });
+  };
+}
