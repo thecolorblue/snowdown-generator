@@ -1,27 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
-import { PassThrough } from 'node:stream';
 import YAML from 'yaml'
 import remarkFrontmatter from 'remark-frontmatter';
 import remarkDirective from 'remark-directive';
 import rehypeKatex from 'rehype-katex';
 import rehypeRaw from 'rehype-raw';
 import rehypeGithubEmoji from 'rehype-github-emoji';
-import rehypeTwemojify from 'rehype-twemojify';
 import {visit} from 'unist-util-visit'
 import {h} from 'hastscript';
-import type { Root, Content, Text as MdastText, Code as MdastCode } from 'mdast';
+import type { Root, Content, Text as MdastText } from 'mdast';
 import type { Node as UnistNode, Data, Parent } from 'unist';
 import type { Element as HastElement, Properties as HastProperties } from 'hast';
 import OpenAI from 'openai';
 
 import {fromMarkdown} from 'mdast-util-from-markdown'
 
-const { lua, lauxlib, lualib, to_jsstring, to_luastring } = require('fengari');
-const LUA_OK = lua.LUA_OK;
+import { lua, lauxlib, lualib, to_jsstring, to_luastring } from 'fengari';
 
-function luaValueToString(L, idx) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function luaValueToString(L: any, idx: any) {
     // Always use luaL_tolstring, which pushes the string on top of the stack
     lauxlib.luaL_tolstring(L, idx);
     // Now top of stack is a string
@@ -37,7 +35,8 @@ function luaValueToString(L, idx) {
 }
 
 // Recursively push a JS object as a Lua table onto the stack
-function pushJsToLua(L, obj) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function pushJsToLua(L: any, obj: any) {
     if (Array.isArray(obj)) {
         lua.lua_createtable(L, obj.length, 0);
         obj.forEach((val, i) => {
@@ -62,7 +61,8 @@ function pushJsToLua(L, obj) {
 }
 
 // Safely convert Lua return value to JS
-function luaReturnToJs(L, idx) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function luaReturnToJs(L: any, idx: any) {
     switch (lua.lua_type(L, idx)) {
         case lua.LUA_TNIL:
             return null;
@@ -79,17 +79,19 @@ function luaReturnToJs(L, idx) {
     }
 }
 
-function runLuaString(luaCode, inputObject) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function runLuaString(luaCode: any, inputObject: any) {
     const L = lauxlib.luaL_newstate();
     lualib.luaL_openlibs(L);
 
     // Buffer to capture Lua print output
-    let outputBuffer = [];
+    const outputBuffer: string[] = [];
 
     // Override the Lua print function
-    lua.lua_pushjsfunction(L, function(L) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    lua.lua_pushjsfunction(L, function(L: any) {
         const n = lua.lua_gettop(L);
-        let parts = [];
+        const parts = [];
         for (let i = 1; i <= n; i++) {
             parts.push(luaValueToString(L, i));
         }
@@ -146,7 +148,7 @@ interface Metadata {
   story_style?: string;
   story_interests?: string;
   story_required_words?: string | string[];
-  [key: string]: any; // Allow other properties
+  [key: string]: unknown; // Allow other properties
 }
 
 // Interface for mdast Code_Block node
@@ -179,7 +181,6 @@ export async function POST(request: NextRequest) {
     const remarkRehype = (await import('remark-rehype')).default;
     const rehypeStringify = (await import('rehype-stringify')).default;
     // remarkGfm might be useful too
-    const remarkGfm = (await import('remark-gfm')).default;
 
 
     const processor = unified()
@@ -444,7 +445,7 @@ function annotateWordCount(story: string): string {
 
 // This plugin handles the :::generate_story directive
 function sdGenerateStory() {
-  return async function transformer(tree: Root, file: any): Promise<void> { // Added 'file' for context if needed by remark/rehype
+  return async function transformer(tree: Root): Promise<void> { // Added 'file' for context if needed by remark/rehype
     const promises: Promise<void>[] = [];
     let metadata: Metadata = {}; // Initialize with Metadata type
     if (tree.children.length > 0 && tree.children[0]?.type === 'yaml') {
@@ -485,8 +486,8 @@ function sdGenerateStory() {
             const firstChild = dn.children[0];
             if (firstChild.type === 'text') {
               storyTopic = (firstChild as MdastText).value;
-            } else if ('value' in firstChild && typeof (firstChild as any).value === 'string') {
-              storyTopic = (firstChild as any).value;
+            } else if ('value' in firstChild && typeof (firstChild as { value: unknown }).value === 'string') {
+              storyTopic = (firstChild as { value: string }).value;
             }
           }
 
@@ -495,7 +496,7 @@ function sdGenerateStory() {
 
           if (metadata.story_required_words) {
             if (Array.isArray(metadata.story_required_words)) {
-              requiredWords = metadata.story_required_words.filter((word: any): word is string => typeof word === 'string'); // Ensure elements are strings
+              requiredWords = metadata.story_required_words.filter((word: unknown): word is string => typeof word === 'string'); // Ensure elements are strings
             } else if (typeof metadata.story_required_words === 'string') {
               requiredWords = metadata.story_required_words.split(',')
                 .map((word: string) => word.trim()) // Typed word
@@ -554,7 +555,6 @@ function luaProcessing() {
     // No explicit promises.push/Promise.all needed here if luaScript.exec() is fully synchronous
     // and stream events resolve before visit callback returns.
     // If luaScript.exec() were async, this would need promise collection.
-    const promises: Promise<void>[] = [];
     let metadata: Metadata = {}; // Initialize with Metadata type
     if (tree.children.length > 0 && tree.children[0]?.type === 'yaml') {
       try {
@@ -580,7 +580,7 @@ function luaProcessing() {
               if (result !== null) {
                 console.log("Lua returned:", result);
               }
-            } catch (err: any) { // Add type annotation for err
+            } catch (err) { // Add type annotation for err
               const errorMessage = err instanceof Error ? err.message : String(err);
               result = "Lua Error:" + errorMessage;
               // Create a text node with the error message if needed, or handle as appropriate
@@ -594,6 +594,7 @@ function luaProcessing() {
             
             // Transform the code node into a paragraph with the Lua output.
             // This assumes stream events have fired and accumulation is complete due to sync exec and .end()
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const transformedNode = node as any; // Cast to any for easier transformation
             transformedNode.type = 'containerDirective';
             transformedNode.name = 'div';

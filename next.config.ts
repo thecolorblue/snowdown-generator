@@ -1,9 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  experimental: {
-    serverComponentsExternalPackages: ['fengari'],
-  },
+  serverExternalPackages: ['fengari'],
   /* config options here */
 };
 
