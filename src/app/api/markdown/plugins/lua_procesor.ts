@@ -1,11 +1,10 @@
 
 
 import {fromMarkdown} from 'mdast-util-from-markdown';
-import type { Root } from 'mdast';
+import type { Root, RootContent } from 'mdast';
 import { lua, lauxlib, lualib, to_jsstring, to_luastring } from 'fengari';
 import type { Node as UnistNode } from 'unist';
 import {visit} from 'unist-util-visit';
-import YAML from 'yaml';
 
 import { getMetaFromRoot, Metadata } from './metadata';
 
@@ -84,6 +83,7 @@ function runLuaString(luaCode: string, inputObject: Metadata) {
 
     const outputBuffer: string[] = [];
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     lua.lua_pushjsfunction(L, function(L: any) {
         const n = lua.lua_gettop(L);
         const parts = [];
@@ -122,6 +122,15 @@ function runLuaString(luaCode: string, inputObject: Metadata) {
     }
 }
 
+export interface LuaCodeNode extends UnistNode {
+    type: 'code' | 'containerDirective';
+    name?: string;
+    children?: RootContent[];
+    value?: string;
+    lang?: string;
+    meta?: string;
+}
+
 export default function luaProcessing() {
   return function transformer(tree: Root) {
     const metadata = getMetaFromRoot(tree);
@@ -145,7 +154,7 @@ export default function luaProcessing() {
 
             const root = fromMarkdown(result);
             
-            const transformedNode = node as any;
+            const transformedNode = node as LuaCodeNode;
             transformedNode.type = 'containerDirective';
             transformedNode.name = 'div';
             transformedNode.children = root.children;

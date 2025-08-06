@@ -1,18 +1,11 @@
 
-import type { Root, Content, Text as MdastText } from 'mdast';
+import type { Root, Text as MdastText } from 'mdast';
 import YAML from 'yaml';
-import type { Node as UnistNode, Data, Parent } from 'unist';
+import type { Node as UnistNode, Data } from 'unist';
 import type { Element as HastElement, Properties as HastProperties } from 'hast';
 import {h} from 'hastscript';
 import {visit} from 'unist-util-visit';
-
-
-interface DirectiveNode extends Parent {
-  type: 'containerDirective' | 'leafDirective' | 'textDirective';
-  name: string;
-  attributes?: Record<string, string>;
-  children: Content[];
-}
+import { DirectiveNode } from '../../shared';
 
 export interface Metadata {
   story_genre?: string;

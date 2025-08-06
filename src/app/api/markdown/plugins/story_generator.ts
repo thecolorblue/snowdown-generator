@@ -9,16 +9,10 @@ import {visit} from 'unist-util-visit'
 import type { Properties as HastProperties } from 'hast';
 
 import { Metadata } from './metadata';
+import { DirectiveNode } from '../../shared';
 
 const CACHE_FILE_PATH = path.join(process.cwd(), 'src', 'app', 'api', 'markdown', 'story-cache.json');
 let storyCache = new Map<string, string>();
-
-interface DirectiveNode extends Parent { // Extend Parent to include children
-  type: 'containerDirective' | 'leafDirective' | 'textDirective';
-  name: string;
-  attributes?: Record<string, string>;
-  children: Content[];
-}
 
 // Load cache from file
 function loadCache() {
