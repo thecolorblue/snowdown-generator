@@ -26,7 +26,7 @@ To enable Google authentication for this application, follow these steps:
 1. **Create a Google Cloud Project:**
    - Go to the [Google Cloud Console](https://console.cloud.google.com/)
    - Create a new project or select an existing one
-   - Enable the Google+ API
+   - Enable the Google People API
 
 2. **Create OAuth Credentials:**
    - Navigate to "APIs & Services" → "Credentials"
