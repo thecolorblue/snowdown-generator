@@ -1,4 +1,4 @@
-import TestAuth from "@/app/api/auth/test-auth"
+import TestAuth from "@/components/TestAuth"
 
 export default function TestAuthPage() {
   return (
