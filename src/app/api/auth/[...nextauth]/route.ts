@@ -1,12 +1,12 @@
-import NextAuth from 'next-auth'
+import NextAuth, { AuthOptions } from 'next-auth'
 import GoogleProvider from 'next-auth/providers/google'
 
 // Define proper types for the auth options
-export const authOptions = {
+export const authOptions: AuthOptions = {
   providers: [
     GoogleProvider({
-      clientId: process.env.GOOGLE_CLIENT_ID || '',
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
+      clientId: process.env.GOOGLE_CLIENT_ID ? process.env.GOOGLE_CLIENT_ID : (() => { throw new Error('Missing GOOGLE_CLIENT_ID environment variable'); })(),
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET ? process.env.GOOGLE_CLIENT_SECRET : (() => { throw new Error('Missing GOOGLE_CLIENT_SECRET environment variable'); })(),
       authorization: {
         params: {
           scope: 'openid email profile',
@@ -19,15 +19,15 @@ export const authOptions = {
   ],
   secret: process.env.NEXTAUTH_SECRET,
   callbacks: {
-    async jwt({ token, user }: { token: DefaultJWT & { id?: string }; user?: DefaultUser & { id: string } }) {
+    async jwt({ token, user }) {
       if (user) {
         token.id = user.id
       }
       return token
     },
-    async session({ session, token }: { session: DefaultSession; token: { id?: string } }) {
+    async session({ session, token }) {
       if (session.user) {
-        session.user.id = token.id
+        session.user.name = token.id as string
       }
       return session
     }
