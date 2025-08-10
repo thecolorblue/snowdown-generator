@@ -122,7 +122,7 @@ function runLuaString(luaCode: string, inputObject: Metadata) {
     }
 }
 
-export interface LuaCodeNode extends UnistNode {
+interface LuaCodeNode extends UnistNode {
     type: 'code' | 'containerDirective';
     name?: string;
     children?: RootContent[];
