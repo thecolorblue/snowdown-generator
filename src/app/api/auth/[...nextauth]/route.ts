@@ -17,25 +17,7 @@ export const authOptions: AuthOptions = {
       }
     })
   ],
-  secret: process.env.NEXTAUTH_SECRET,
-  callbacks: {
-    async jwt({ token, user }) {
-      if (user) {
-        token.id = user.id
-      }
-      return token
-    },
-    async session({ session, token }) {
-      if (session.user) {
-        session.user.name = token.id as string
-      }
-      return session
-    }
-  },
-  pages: {
-    signIn: '/api/auth/signin',
-    error: '/api/auth/error'
-  }
+  secret: process.env.NEXTAUTH_SECRET
 }
 
 // Create the handler for GET and POST requests
