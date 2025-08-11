@@ -44,7 +44,8 @@ export async function POST(req: NextRequest) {
     });
 
     // Send the PDF buffer as a response
-    const response = new NextResponse(pdfBuffer, {
+    const blob = new Blob([new Uint8Array(pdfBuffer)], { type: 'application/pdf' });
+    const response = new NextResponse(blob, {
       status: 200,
       headers: {
         'Content-Type': 'application/pdf',
