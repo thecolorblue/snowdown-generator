@@ -49,7 +49,7 @@ function saveCache() {
 // Load the cache when the module starts
 loadCache();
 
-export interface StoryParams {
+interface StoryParams {
   genre: string;
   location: string;
   style: string;
@@ -61,7 +61,7 @@ export interface StoryParams {
   user_age: number;
   paragraphs: number; // Added from original call, though not in template
 }
-export async function generateStory(storyTopic: string, params: StoryParams): Promise<string> {
+async function generateStory(storyTopic: string, params: StoryParams): Promise<string> {
   const cacheKey = JSON.stringify({ storyTopic, params });
 
   if (storyCache.has(cacheKey)) {

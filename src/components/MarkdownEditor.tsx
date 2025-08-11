@@ -52,16 +52,11 @@ export default function MarkdownEditor() {
         const computedStyle = getComputedStyle(previewRef.current);
         const backgroundColor = computedStyle.backgroundColor;
         const canvas = await html2canvas(previewRef.current, {
-          backgroundColor: backgroundColor || '#ffffff',
-          scrollX: -window.scrollX,
-          scrollY: -window.scrollY,
+          background: backgroundColor || '#ffffff',
           width: width,
           height: width * 1.294,
           logging: true,
           useCORS: true,
-          onclone: () => {
-            // Optional: Modify the cloned document before rendering
-          }
         });
         const imgData = canvas.toDataURL('image/png');
         
@@ -216,7 +211,7 @@ export default function MarkdownEditor() {
             border: 'none',
             borderRadius: '4px',
             cursor: 'pointer',
-            zIndex: 1000,
+            zIndex: 1,
           }}
         >
           Print
