@@ -216,7 +216,7 @@ export default function MarkdownEditor() {
             border: 'none',
             borderRadius: '4px',
             cursor: 'pointer',
-            zIndex: 1000,
+            zIndex: 1,
           }}
         >
           Print

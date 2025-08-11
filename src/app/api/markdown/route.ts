@@ -5,6 +5,11 @@ import rehypeKatex from 'rehype-katex';
 import rehypeRaw from 'rehype-raw';
 import rehypeGithubEmoji from 'rehype-github-emoji';
 
+import { unified } from 'unified';
+import remarkParse from 'remark-parse';
+import remarkRehype from 'remark-rehype';
+import rehypeStringify from 'rehype-stringify';
+
 import { sdMetadata } from './plugins/metadata';
 import luaProcessing from './plugins/lua_procesor';
 import { sdGenerateStory } from './plugins/story_generator';
@@ -21,12 +26,6 @@ export async function POST(request: NextRequest) {
     if (!markdownText.trim()) {
       return NextResponse.json({ html: '' });
     }
-
-    const { unified } = await import('unified');
-    const remarkParse = (await import('remark-parse')).default;
-    const remarkRehype = (await import('remark-rehype')).default;
-    const rehypeStringify = (await import('rehype-stringify')).default;
-
 
     const processor = unified()
       .use(remarkParse)
